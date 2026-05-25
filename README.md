@@ -1,13 +1,14 @@
 # Dify Go SDK
-This is the Go SDK for the Dify API, which allows you to easily integrate Dify into your Go applications.
+
+Go SDK for the Dify API, supporting all Dify application types and Knowledge Base operations.
 
 ## Install
+
 ```bash
-go get github.com/BeatsKitano/dify-sdk-go
+go get github.com/KevinZhao/dify-sdk-go
 ```
 
-## Usage
-After installing the SDK, you can use it in your project like this:
+## Quick Start
 
 ```go
 package main
@@ -17,49 +18,139 @@ import (
 	"log"
 	"strings"
 
-	"github.com/BeatsKitano/dify-sdk-go"
+	"github.com/KevinZhao/dify-sdk-go"
 )
 
 func main() {
-	var (
-		ctx = context.Background()
-		c = dify.NewClient("your-dify-server-host", "your-api-key-here")
+	ctx := context.Background()
+	client := dify.NewClient("https://your-dify-host", "app-your-api-key")
 
-		req = &dify.ChatMessageRequest{
-			Query: "your-question",
-			User: "your-user",
-		}
-
-		ch chan dify.ChatMessageStreamChannelResponse
-		err error
-	)
-
-	if ch, err = c.Api().ChatMessagesStream(ctx, req); err != nil {
-		return
+	ch, err := client.API().ChatMessagesStream(ctx, &dify.ChatMessageRequest{
+		Query: "Hello!",
+		User:  "user-123",
+	})
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	var strBuilder strings.Builder
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case streamData, isOpen := <-ch:
-			if err = streamData.Err; err != nil {
-				log.Println(err.Error())
-				return
-			}
-			if !isOpen {
-				log.Println(strBuilder.String())
-				return
-			}
-
-			strBuilder.WriteString(streamData.Answer)
+	for r := range ch {
+		if r.Err != nil {
+			log.Fatal(r.Err)
 		}
+		strBuilder.WriteString(r.Answer)
 	}
+	log.Println(strBuilder.String())
+}
+```
+
+## Features
+
+### Chat API
+- `ChatMessages` / `ChatMessagesStream` - Send messages (blocking/streaming)
+- `StopChatMessage` - Stop streaming generation
+- `Messages` - Get conversation history
+- `Conversations` - List conversations (supports `sort_by`)
+- `ConversationsRenaming` - Rename conversation
+- `DeleteConversation` - Delete conversation
+- `MessagesFeedbacks` - Submit like/dislike feedback
+- `SuggestedQuestions` - Get suggested follow-up questions
+- `AppFeedbacks` - List all feedback for the app
+- `Parameters` - Get application parameter info
+
+### Completion API
+- `CompletionMessages` / `CompletionMessagesStream` - Text generation (blocking/streaming)
+- `StopCompletionMessage` - Stop generation
+
+### Workflow API
+- `RunWorkflow` / `RunStreamWorkflow` / `RunStreamWorkflowWithHandler` - Execute workflows
+- `GetWorkflowRun` - Get workflow execution result
+- `WorkflowLogs` - Query workflow execution logs
+- `StopWorkflowTask` - Stop workflow task
+
+### File API
+- `UploadFile` - Upload files for chat/workflow
+- `FilePreview` - Download/preview uploaded files
+
+### Knowledge Base API
+- `CreateDataset` / `Datasets` / `UpdateDataset` / `DeleteDataset` - Dataset CRUD
+- `CreateDocumentByText` / `CreateDocumentByFile` - Create documents
+- `GetDocumentIndexingStatus` - Check indexing progress
+- `UpdateDocumentStatus` - Enable/disable/archive documents
+- `CreateSegments` / `Segments` / `UpdateSegment` / `DeleteSegment` - Chunk management
+- `Retrieve` - Test retrieval against a dataset
+
+### General
+- `Info` - Get application basic info
+- `Site` - Get webapp settings
+
+## Advanced Usage
+
+### Per-call API secret override
+
+```go
+resp, err := client.API().WithSecret("app-another-key").ChatMessages(ctx, req)
+```
+
+### Custom HTTP client
+
+```go
+client := dify.NewClientWithConfig(&dify.ClientConfig{
+	Host:             "https://your-dify-host",
+	DefaultAPISecret: "app-your-api-key",
+	Timeout:          30 * time.Second,
+})
+```
+
+### Streaming workflow with full event handling
+
+```go
+handler := &dify.DefaultEventHandler{
+	StreamHandler: func(resp dify.StreamingResponse) {
+		switch resp.Event {
+		case dify.EventWorkflowStarted:
+			log.Println("Workflow started:", resp.WorkflowRunID)
+		case dify.EventWorkflowFinished:
+			log.Println("Workflow finished:", resp.Data.Outputs)
+		}
+	},
+	TTSHandler: func(msg dify.TTSMessage) {
+		log.Println("TTS audio length:", len(msg.Audio))
+	},
+	TextChunkHandler: func(msg dify.TextChunkResponse) {
+		log.Println("Text chunk:", msg.Text)
+	},
 }
 
+client.API().RunStreamWorkflowWithHandler(ctx, workflowReq, handler)
+```
+
+### Knowledge Base usage
+
+```go
+// Create a dataset
+ds, _ := client.API().CreateDataset(ctx, &dify.DatasetRequest{
+	Name: "My Knowledge Base",
+})
+
+// Add a document
+doc, _ := client.API().CreateDocumentByText(ctx, ds.ID, &dify.CreateDocumentByTextRequest{
+	Name: "Document 1",
+	Text: "Document content here...",
+	ProcessRule: &dify.ProcessRule{
+		Mode: "automatic",
+	},
+})
+
+// Check indexing status
+status, _ := client.API().GetDocumentIndexingStatus(ctx, ds.ID, doc.Batch)
+
+// Retrieve
+results, _ := client.API().Retrieve(ctx, ds.ID, &dify.RetrieveRequest{
+	Query: "search query",
+})
 ```
 
 ## License
-This SDK is released under the MIT License.
+
+MIT

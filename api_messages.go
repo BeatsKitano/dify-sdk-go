@@ -3,7 +3,6 @@ package dify
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 )
@@ -14,9 +13,10 @@ const (
 )
 
 type MessagesFeedbacksRequest struct {
-	MessageID string `json:"message_id,omitempty"`
-	Rating    string `json:"rating,omitempty"`
+	MessageID string `json:"-"`
+	Rating    string `json:"rating"`
 	User      string `json:"user"`
+	Content   string `json:"content,omitempty"`
 }
 
 type MessagesFeedbacksResponse struct {
@@ -49,18 +49,33 @@ type MessagesResponse struct {
 }
 
 type MessagesDataResponse struct {
-	ID             string                 `json:"id"`
-	ConversationID string                 `json:"conversation_id"`
-	Inputs         map[string]interface{} `json:"inputs"`
-	Query          string                 `json:"query"`
-	Answer         string                 `json:"answer"`
-	Feedback       interface{}            `json:"feedback"`
-	CreatedAt      int64                  `json:"created_at"`
+	ID             string         `json:"id"`
+	ConversationID string         `json:"conversation_id"`
+	Inputs         map[string]any `json:"inputs"`
+	Query          string         `json:"query"`
+	Answer         string         `json:"answer"`
+	Feedback       any            `json:"feedback"`
+	CreatedAt      int64          `json:"created_at"`
 }
 
-/* Get the chat history message
- * The first page returns the latest limit bar, which is in reverse order.
- */
+type SuggestedQuestionsResponse struct {
+	Result string   `json:"result"`
+	Data   []string `json:"data"`
+}
+
+type AppFeedbacksRequest struct {
+	Page  int    `json:"page"`
+	Limit int    `json:"limit"`
+	User  string `json:"user"`
+}
+
+type AppFeedbacksResponse struct {
+	HasMore bool   `json:"has_more"`
+	Page    int    `json:"page"`
+	Limit   int    `json:"limit"`
+	Data    []any  `json:"data"`
+}
+
 func (api *API) Messages(ctx context.Context, req *MessagesRequest) (resp *MessagesResponse, err error) {
 	httpReq, err := api.createBaseRequest(ctx, http.MethodGet, "/v1/messages", nil)
 	if err != nil {
@@ -81,23 +96,52 @@ func (api *API) Messages(ctx context.Context, req *MessagesRequest) (resp *Messa
 	return
 }
 
-/* Message terminal user feedback, like
- * Rate received messages on behalf of end-users with likes or dislikes.
- * This data is visible in the Logs & Annotations page and used for future model fine-tuning.
- */
 func (api *API) MessagesFeedbacks(ctx context.Context, req *MessagesFeedbacksRequest) (resp *MessagesFeedbacksResponse, err error) {
 	if req.MessageID == "" {
-		err = errors.New("MessagesFeedbacksRequest.MessageID Illegal")
+		err = errors.New("MessagesFeedbacksRequest.MessageID is required")
 		return
 	}
 
-	url := fmt.Sprintf("/v1/messages/%s/feedbacks", req.MessageID)
-	req.MessageID = ""
-
-	httpReq, err := api.createBaseRequest(ctx, http.MethodPost, url, req)
+	httpReq, err := api.createBaseRequest(ctx, http.MethodPost, "/v1/messages/"+req.MessageID+"/feedbacks", req)
 	if err != nil {
 		return
 	}
+	err = api.c.sendJSONRequest(httpReq, &resp)
+	return
+}
+
+func (api *API) SuggestedQuestions(ctx context.Context, messageID string, user string) (resp *SuggestedQuestionsResponse, err error) {
+	httpReq, err := api.createBaseRequest(ctx, http.MethodGet, "/v1/messages/"+messageID+"/suggested", nil)
+	if err != nil {
+		return
+	}
+
+	query := httpReq.URL.Query()
+	query.Set("user", user)
+	httpReq.URL.RawQuery = query.Encode()
+
+	err = api.c.sendJSONRequest(httpReq, &resp)
+	return
+}
+
+func (api *API) AppFeedbacks(ctx context.Context, req *AppFeedbacksRequest) (resp *AppFeedbacksResponse, err error) {
+	httpReq, err := api.createBaseRequest(ctx, http.MethodGet, "/v1/app/feedbacks", nil)
+	if err != nil {
+		return
+	}
+
+	query := httpReq.URL.Query()
+	if req.Page > 0 {
+		query.Set("page", strconv.Itoa(req.Page))
+	}
+	if req.Limit > 0 {
+		query.Set("limit", strconv.Itoa(req.Limit))
+	}
+	if req.User != "" {
+		query.Set("user", req.User)
+	}
+	httpReq.URL.RawQuery = query.Encode()
+
 	err = api.c.sendJSONRequest(httpReq, &resp)
 	return
 }

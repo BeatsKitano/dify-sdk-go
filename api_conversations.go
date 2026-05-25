@@ -3,7 +3,6 @@ package dify
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 )
@@ -11,6 +10,7 @@ import (
 type ConversationsRequest struct {
 	LastID string `json:"last_id,omitempty"`
 	Limit  int    `json:"limit"`
+	SortBy string `json:"sort_by,omitempty"`
 	User   string `json:"user"`
 }
 
@@ -23,14 +23,15 @@ type ConversationsResponse struct {
 type ConversationsDataResponse struct {
 	ID        string            `json:"id"`
 	Name      string            `json:"name"`
-	Inputs    map[string]string `json:"inputs"`
+	Inputs    map[string]any    `json:"inputs"`
 	Status    string            `json:"status"`
 	CreatedAt int64             `json:"created_at"`
 }
 
 type ConversationsRenamingRequest struct {
-	ConversationID string `json:"conversation_id,omitempty"`
+	ConversationID string `json:"-"`
 	Name           string `json:"name"`
+	AutoGenerate   *bool  `json:"auto_generate,omitempty"`
 	User           string `json:"user"`
 }
 
@@ -38,12 +39,9 @@ type ConversationsRenamingResponse struct {
 	Result string `json:"result"`
 }
 
-/* Get conversation list
- * Gets the session list of the current user. By default, the last 20 sessions are returned.
- */
 func (api *API) Conversations(ctx context.Context, req *ConversationsRequest) (resp *ConversationsResponse, err error) {
 	if req.User == "" {
-		err = errors.New("ConversationsRequest.User Illegal")
+		err = errors.New("ConversationsRequest.User is required")
 		return
 	}
 	if req.Limit == 0 {
@@ -56,21 +54,22 @@ func (api *API) Conversations(ctx context.Context, req *ConversationsRequest) (r
 	}
 
 	query := httpReq.URL.Query()
-	query.Set("last_id", req.LastID)
 	query.Set("user", req.User)
 	query.Set("limit", strconv.FormatInt(int64(req.Limit), 10))
+	if req.LastID != "" {
+		query.Set("last_id", req.LastID)
+	}
+	if req.SortBy != "" {
+		query.Set("sort_by", req.SortBy)
+	}
 	httpReq.URL.RawQuery = query.Encode()
 
 	err = api.c.sendJSONRequest(httpReq, &resp)
 	return
 }
 
-/* Conversation renaming
- * Rename conversations; the name is displayed in multi-session client interfaces.
- */
 func (api *API) ConversationsRenaming(ctx context.Context, req *ConversationsRenamingRequest) (resp *ConversationsRenamingResponse, err error) {
-	url := fmt.Sprintf("/v1/conversations/%s/name", req.ConversationID)
-	req.ConversationID = ""
+	url := "/v1/conversations/" + req.ConversationID + "/name"
 
 	httpReq, err := api.createBaseRequest(ctx, http.MethodPost, url, req)
 	if err != nil {
@@ -78,4 +77,17 @@ func (api *API) ConversationsRenaming(ctx context.Context, req *ConversationsRen
 	}
 	err = api.c.sendJSONRequest(httpReq, &resp)
 	return
+}
+
+func (api *API) DeleteConversation(ctx context.Context, conversationID string, user string) error {
+	httpReq, err := api.createBaseRequest(ctx, http.MethodDelete, "/v1/conversations/"+conversationID, nil)
+	if err != nil {
+		return err
+	}
+
+	query := httpReq.URL.Query()
+	query.Set("user", user)
+	httpReq.URL.RawQuery = query.Encode()
+
+	return api.c.sendDeleteRequest(httpReq)
 }
