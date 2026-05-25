@@ -14,7 +14,7 @@ type Client struct {
 }
 
 func NewClientWithConfig(c *ClientConfig) *Client {
-	var httpClient = &http.Client{}
+	httpClient := &http.Client{}
 
 	if c.Timeout != 0 {
 		httpClient.Timeout = c.Timeout
@@ -23,13 +23,9 @@ func NewClientWithConfig(c *ClientConfig) *Client {
 		httpClient.Transport = c.Transport
 	}
 
-	secret := c.DefaultAPISecret
-	if secret == "" {
-		secret = c.ApiSecretKey
-	}
 	return &Client{
 		host:             c.Host,
-		defaultAPISecret: secret,
+		defaultAPISecret: c.DefaultAPISecret,
 		httpClient:       httpClient,
 	}
 }
@@ -58,32 +54,47 @@ func (c *Client) sendJSONRequest(req *http.Request, res interface{}) error {
 			Message string `json:"message"`
 			Status  int    `json:"status"`
 		}
-		err = json.NewDecoder(resp.Body).Decode(&errBody)
-		if err != nil {
-			return err
+		if err := json.NewDecoder(resp.Body).Decode(&errBody); err != nil {
+			return fmt.Errorf("HTTP %d: failed to decode error response", resp.StatusCode)
 		}
 		return fmt.Errorf("HTTP response error: [%v]%v", errBody.Code, errBody.Message)
 	}
 
-	err = json.NewDecoder(resp.Body).Decode(res)
+	if res != nil {
+		if err := json.NewDecoder(resp.Body).Decode(res); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *Client) sendDeleteRequest(req *http.Request) error {
+	resp, err := c.sendRequest(req)
 	if err != nil {
 		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		var errBody struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+			Status  int    `json:"status"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&errBody); err != nil {
+			return fmt.Errorf("HTTP %d: failed to decode error response", resp.StatusCode)
+		}
+		return fmt.Errorf("HTTP response error: [%v]%v", errBody.Code, errBody.Message)
 	}
 	return nil
 }
 
 func (c *Client) getHost() string {
-	var host = strings.TrimSuffix(c.host, "/")
-	return host
+	return strings.TrimSuffix(c.host, "/")
 }
 
 func (c *Client) getAPISecret() string {
 	return c.defaultAPISecret
-}
-
-// Api deprecated, use API() instead
-func (c *Client) Api() *API {
-	return c.API()
 }
 
 func (c *Client) API() *API {
